@@ -35,7 +35,7 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 
 				default:
 					fmt.Println("Working...")
-					ch <- i
+					ch <- i // Possible deadlock if there is no consumer!
 					time.Sleep(500 * time.Millisecond)
 				}
 			}
@@ -50,6 +50,8 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 				select {
 					case <-done:
 						return
+					// Possible unwanted read because the worker can be closed
+					// and we would be reading 0 from the channel (default value for int chan)
 					case collectedResult := <-results:
 						fmt.Printf("Received %d from channel\n", collectedResult)
 						*consumedItems = append(*consumedItems, collectedResult)
@@ -66,6 +68,9 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 
 	fmt.Println("Working for", workTimeInSeconds)
 	time.Sleep(workTimeInSeconds)
+
+	// This flow can cause data race
+	// if the consumer is still pushing data to the slice while we are trying to read its length.
 	close(workerDoneCh)
 	close(consumerDoneCh)
 
