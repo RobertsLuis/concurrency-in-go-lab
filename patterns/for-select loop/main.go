@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	workTimeInSeconds = 3 * time.Second
+	workTimeInSeconds = 5 * time.Second
 )
 
 func main() {
@@ -54,15 +54,25 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 	}
 
 	consumer := func(results <-chan int, finished chan<- struct{}, consumedItems *[]int) {
+		const (
+			generalTimeoutDuration = 6 * time.Second // permissive fn - set to 4 to check the general timeout
+			perReadTimeoutDuration = 600 * time.Millisecond // permissive fn - set 400 to check the per-read timeout
+		)
 		go func() {
 			defer close(finished)
 
-			timeout := time.After(workTimeInSeconds + 1*time.Second) // consumer timeout
-
+			generalTimeout := time.After(generalTimeoutDuration) // consumer timeout
+			// create a time 'channel' that will send a signal after a certain duration
+			// as we can control and reset it manually, we can use it to implement a timeout for each read from the results channel 
+			perReadTimeout := time.NewTimer(perReadTimeoutDuration)
+			defer perReadTimeout.Stop()
 			for {
 				select {
-					case <-timeout:
+					case <-generalTimeout:
 						fmt.Println("Consumer timeout reached, stopping consumer.")
+						return
+					case <-perReadTimeout.C:
+						fmt.Println("Per-read timeout reached, no new data received, stopping consumer.")
 						return
 
 					case value, ok := <-results:
@@ -72,6 +82,9 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 						}
 						fmt.Printf("Received %d from channel\n", value)
 						*consumedItems = append(*consumedItems, value)
+
+						// Reset the per-read timeout after successfully receiving a value
+						perReadTimeout.Reset(perReadTimeoutDuration)
 				}
 			}
 		}()
