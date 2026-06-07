@@ -39,7 +39,7 @@ func withAdHocConfinement(wg *sync.WaitGroup) {
 func withLexicalConfinement(wg *sync.WaitGroup) {
 	fmt.Println("=== Lexical confinement ===")
 
-	buildData := func() <-chan int {
+	builder := func() <-chan int {
 		data := []int{1, 2, 3, 4, 5}
 		ch := make(chan int)
 		go func() {
@@ -52,12 +52,15 @@ func withLexicalConfinement(wg *sync.WaitGroup) {
 		return ch
 	}
 
-	go func() {
-		ch := buildData()
-		for v := range ch {
-			fmt.Printf("L.C -> Received %d from channel\n", v)
+	consumer := func(results <- chan int) {
+		for value := range results {
+			fmt.Printf("L.C -> Received %d from channel\n", value)
 		}
+	}
+
+	results := builder()
+	go func() {
+		consumer(results)
 		wg.Done()
 	}()
 }
-
