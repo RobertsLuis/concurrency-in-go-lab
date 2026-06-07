@@ -57,9 +57,22 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 		go func() {
 			defer close(finished)
 
-			for value := range results { // this wont pass if the result is closed!
-				fmt.Printf("Received %d from channel\n", value)
-				*consumedItems = append(*consumedItems, value)
+			timeout := time.After(workTimeInSeconds + 1*time.Second) // consumer timeout
+
+			for {
+				select {
+					case <-timeout:
+						fmt.Println("Consumer timeout reached, stopping consumer.")
+						return
+
+					case value, ok := <-results:
+						if !ok {
+							fmt.Println("Results channel closed, stopping consumer.")
+							return
+						}
+						fmt.Printf("Received %d from channel\n", value)
+						*consumedItems = append(*consumedItems, value)
+				}
 			}
 		}()
 	}
