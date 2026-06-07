@@ -11,9 +11,11 @@ const (
 )
 
 func main() {
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
+
 	go withForSelectLoop(&wg)
+
 	wg.Wait()
 }
 
@@ -33,9 +35,16 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 				case <-done:
 					return
 
-				default:
+				// this won't block if there is no consumer ready:
+				// it will try to send
+				// fail
+				// and go back to the for loop.
+				// Then, the done chan can cancell the worker!!!
+
+				// the previous way, we would be stuck trying to send to the channel at default statement
+				// and never check the done chan again, so we would never be able to stop the worker.
+				case ch <- i:
 					fmt.Println("Working...")
-					ch <- i // Possible deadlock if there is no consumer!
 					time.Sleep(500 * time.Millisecond)
 				}
 			}
@@ -44,35 +53,32 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 		return ch
 	}
 
-	consumer := func(results <-chan int, done <- chan struct{}, consumedItems *[]int) {
+	consumer := func(results <-chan int, finished chan<- struct{}, consumedItems *[]int) {
 		go func() {
-			for {
-				select {
-					case <-done:
-						return
-					// Possible unwanted read because the worker can be closed
-					// and we would be reading 0 from the channel (default value for int chan)
-					case collectedResult := <-results:
-						fmt.Printf("Received %d from channel\n", collectedResult)
-						*consumedItems = append(*consumedItems, collectedResult)
-					}
+			defer close(finished)
+
+			for value := range results { // this wont pass if the result is closed!
+				fmt.Printf("Received %d from channel\n", value)
+				*consumedItems = append(*consumedItems, value)
 			}
 		}()
 	}
 
 	workerDoneCh := make(chan struct{})
-	consumerDoneCh := make(chan struct{})
+	consumerFinishedCh := make(chan struct{})
+
 	workerResults := worker(workerDoneCh)
+
 	var consumedItems []int
-	consumer(workerResults, consumerDoneCh, &consumedItems)
+	consumer(workerResults, consumerFinishedCh, &consumedItems)
 
 	fmt.Println("Working for", workTimeInSeconds)
 	time.Sleep(workTimeInSeconds)
 
-	// This flow can cause data race
-	// if the consumer is still pushing data to the slice while we are trying to read its length.
 	close(workerDoneCh)
-	close(consumerDoneCh)
+
+	// Wait for the consumer to finish processing all results after the worker is done.
+	<-consumerFinishedCh // similar to wg.Wait() but with channels / and similar with for select loop with 1 select statment in done ch
 
 	fmt.Printf("We received %d results after working for %v\n", len(consumedItems), workTimeInSeconds)
 }
