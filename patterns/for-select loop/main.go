@@ -44,29 +44,30 @@ func withForSelectLoop(wg *sync.WaitGroup) {
 		return ch
 	}
 
-	consumer := func(results <-chan int, done chan<- struct{}, resultList *[]int) {
-		defer close(done)
-
-		for collectedResult := range results {
-			fmt.Printf("Received %d from channel\n", collectedResult)
-			*resultList = append(*resultList, collectedResult)
-		}
+	consumer := func(results <-chan int, done <- chan struct{}, consumedItems *[]int) {
+		go func() {
+			for {
+				select {
+					case <-done:
+						return
+					case collectedResult := <-results:
+						fmt.Printf("Received %d from channel\n", collectedResult)
+						*consumedItems = append(*consumedItems, collectedResult)
+					}
+			}
+		}()
 	}
 
 	workerDoneCh := make(chan struct{})
 	consumerDoneCh := make(chan struct{})
 	workerResults := worker(workerDoneCh)
-
-	var consumerResults []int
-	go consumer(workerResults, consumerDoneCh, &consumerResults)
+	var consumedItems []int
+	consumer(workerResults, consumerDoneCh, &consumedItems)
 
 	fmt.Println("Working for", workTimeInSeconds)
 	time.Sleep(workTimeInSeconds)
 	close(workerDoneCh)
+	close(consumerDoneCh)
 
-	// Another way to wait to some goroutine to finish, instead of using WaitGroup
-	// similar to for-select loop with 1 select case in consumerDoneCh and no default
-	<-consumerDoneCh 
-
-	fmt.Printf("We received %d results after working for %v\n", len(consumerResults), workTimeInSeconds)
+	fmt.Printf("We received %d results after working for %v\n", len(consumedItems), workTimeInSeconds)
 }
